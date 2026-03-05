@@ -37,6 +37,7 @@ except ImportError:
 
 # ── Configuração ──────────────────────────────────────────────
 BASE_DIR      = Path(__file__).parent
+DLL_DIR       = BASE_DIR / "libs"             # pasta para DLLs do LibreHardwareMonitor
 DB_PATH       = BASE_DIR / "monitor.db"
 LOG_PATH      = BASE_DIR / "monitor.log"
 SHUTDOWN_FLAG = BASE_DIR / ".clean_shutdown"  # existe → último shutdown foi limpo
@@ -58,13 +59,9 @@ _lhm_computer = None
 
 def _find_dll():
     candidates = [
-        BASE_DIR / "LibreHardwareMonitorLib.dll",
-        Path.home() / "acer_monitor" / "LibreHardwareMonitorLib.dll",
+        DLL_DIR / "LibreHardwareMonitorLib.dll",   # pasta libs/ (preferencial)
+        BASE_DIR / "LibreHardwareMonitorLib.dll",  # raiz do projeto (fallback)
     ]
-    winget = Path.home() / "AppData/Local/Microsoft/WinGet/Packages"
-    if winget.exists():
-        for dll in winget.rglob("LibreHardwareMonitorLib.dll"):
-            candidates.append(dll)
     for p in candidates:
         if p.is_file():
             return p
@@ -78,7 +75,7 @@ def init_lhm():
         dll = _find_dll()
         if dll is None:
             log.warning("LibreHardwareMonitorLib.dll não encontrada — temperatura desativada.")
-            log.warning(f"Copie a DLL para: {BASE_DIR}")
+            log.warning(f"Copie as DLLs para: {DLL_DIR}")
             return False
         clr.AddReference(str(dll))
         from LibreHardwareMonitor.Hardware import Computer

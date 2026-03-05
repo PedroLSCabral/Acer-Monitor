@@ -5,8 +5,7 @@ dashboard.html
 .clean_shutdown
 
 # DLLs do LibreHardwareMonitor — binários de terceiros
-*.dll
-*.pdb
+libs/
 
 # Python
 __pycache__/

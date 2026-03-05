@@ -31,7 +31,7 @@ Monitor de sistema em background para investigar reinicializações aleatórias 
 ### 1. Clone o repositório
 
 ```powershell
-git clone https://github.com/PedroLSCabral/Acer-Monitor.git
+git clone https://github.com/SEU_USUARIO/acer-crash-monitor.git
 cd acer-crash-monitor
 ```
 
@@ -47,9 +47,10 @@ O Windows não expõe temperatura de CPU nativamente. É necessária a DLL do Li
 
 1. Baixe o `.zip` em: [LibreHardwareMonitor Releases](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/releases)
 2. Extraia o arquivo
-3. Copie `LibreHardwareMonitorLib.dll` e todas as outras `.dll` para a pasta do projeto
+3. Crie a pasta `libs/` na raiz do projeto
+4. Copie `LibreHardwareMonitorLib.dll` e todas as outras `.dll` para dentro de `libs/`
 
-> A DLL não está incluída no repositório pois é um binário de terceiros. O monitor funciona sem ela, mas sem leitura de temperatura.
+> A pasta `libs/` não está incluída no repositório pois contém binários de terceiros. O monitor funciona sem ela, mas sem leitura de temperatura.
 
 ### 4. Teste a leitura de temperatura
 
@@ -133,6 +134,7 @@ Examina os **5 minutos antes de cada crash** e calcula médias e máximos de cad
 
 ```
 acer-crash-monitor/
+├── libs/                   # DLLs do LibreHardwareMonitor (não versionado)
 ├── monitor.py              # Daemon principal de coleta
 ├── lhm_reader.py           # Teste isolado de leitura de temperatura
 ├── dashboard.py            # Gerador do relatório HTML

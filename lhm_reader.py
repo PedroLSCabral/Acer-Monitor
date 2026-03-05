@@ -22,21 +22,15 @@ from pathlib import Path
 # ── Localiza a DLL ────────────────────────────────────────────
 def find_lhm_dll():
     """Procura a DLL em locais comuns."""
+    base = Path(__file__).parent
     candidates = [
-        Path(__file__).parent / "LibreHardwareMonitorLib.dll",
-        Path.home() / "acer_monitor" / "LibreHardwareMonitorLib.dll",
-        Path("C:/Program Files/LibreHardwareMonitor/LibreHardwareMonitorLib.dll"),
-        # Pasta do winget
-        Path.home() / "AppData/Local/Microsoft/WinGet/Packages" ,
+        base / "libs" / "LibreHardwareMonitorLib.dll",   # pasta libs/ (preferencial)
+        base / "LibreHardwareMonitorLib.dll",             # raiz do projeto (fallback)
+        Path.home() / "acer_monitor" / "libs" / "LibreHardwareMonitorLib.dll",
     ]
     for p in candidates:
         if p.is_file():
             return p
-    # Busca recursiva em AppData
-    winget_base = Path.home() / "AppData/Local/Microsoft/WinGet/Packages"
-    if winget_base.exists():
-        for dll in winget_base.rglob("LibreHardwareMonitorLib.dll"):
-            return dll
     return None
 
 
