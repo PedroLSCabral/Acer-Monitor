@@ -31,7 +31,7 @@ Monitor de sistema em background para investigar reinicializações aleatórias 
 ### 1. Clone o repositório
 
 ```powershell
-git clone https://github.com/SEU_USUARIO/acer-crash-monitor.git
+git clone https://github.com/PedroLSCabral/Acer-Monitor.git
 cd acer-crash-monitor
 ```
 
