@@ -24,8 +24,7 @@ import signal
 import logging
 import platform
 import threading
-import tkinter as tk
-from tkinter import simpledialog, messagebox
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -242,50 +241,39 @@ def _clear_shutdown_flag():
         pass
 
 
-def _ask_reboot_reason(boot_event_id, conn):
+def _notify_reboot(boot_event_id, clean):
     """
-    Abre um popup perguntando se a reinicialização foi intencional.
+    Envia notificação toast do Windows informando o reboot detectado
+    e orienta o usuário a classificar via classify_reboot.py.
     Roda em thread separada para não bloquear a coleta.
     """
-    def ask():
+    def notify():
         try:
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
+            flag_str  = "encerramento limpo" if clean else "sem flag de shutdown — possível crash"
+            classify  = BASE_DIR / "classify_reboot.py"
 
-            answer = messagebox.askyesnocancel(
-                "Acer Crash Monitor",
-                "Uma reinicialização foi detectada.\n\n"
-                "Foi uma reinicialização INTENCIONAL\n"
-                "(você mesmo reiniciou ou desligou o PC)?\n\n"
-                "  Sim  → Intencional (manual)\n"
-                "  Não  → Crash / reinicialização inesperada\n"
-                "  Cancelar → Não sei / pular",
-                icon="question"
+            # Notificação toast via PowerShell (nativa, sem dependências)
+            ps_script = f"""
+Add-Type -AssemblyName System.Windows.Forms
+$notify = New-Object System.Windows.Forms.NotifyIcon
+$notify.Icon = [System.Drawing.SystemIcons]::Warning
+$notify.BalloonTipIcon = 'Warning'
+$notify.BalloonTipTitle = 'Acer Crash Monitor'
+$notify.BalloonTipText = 'Reinicializacao detectada ({flag_str}). Abra classify_reboot.py para classificar.'
+$notify.Visible = $true
+$notify.ShowBalloonTip(8000)
+Start-Sleep -Milliseconds 8500
+$notify.Dispose()
+"""
+            subprocess.Popen(
+                ["powershell", "-WindowStyle", "Hidden", "-Command", ps_script],
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
-            root.destroy()
-
-            if answer is True:
-                kind = "intencional"
-                note = "Reinicialização manual pelo usuário"
-            elif answer is False:
-                kind = "crash"
-                note = "Crash / reinicialização inesperada (confirmado pelo usuário)"
-            else:
-                kind = "desconhecido"
-                note = "Reinicialização detectada — tipo não informado"
-
-            conn.execute(
-                "UPDATE boot_events SET kind = ?, notes = ? WHERE id = ?",
-                (kind, note, boot_event_id)
-            )
-            conn.commit()
-            log.info(f"Reinicialização classificada como: {kind}")
-
+            log.info("Notificação toast enviada.")
         except Exception as e:
-            log.warning(f"Erro ao exibir popup de classificação: {e}")
+            log.warning(f"Erro ao enviar notificação: {e}")
 
-    threading.Thread(target=ask, daemon=True).start()
+    threading.Thread(target=notify, daemon=True).start()
 
 
 def detect_reboot(conn):
@@ -325,8 +313,7 @@ def detect_reboot(conn):
         if not is_first:
             flag_str = "✅ encerramento limpo anterior" if clean else "⚠️  sem flag de shutdown"
             log.warning(f"🔄 REINICIALIZAÇÃO DETECTADA ({flag_str}) — boot {boot_time}")
-            # Abre popup para o usuário classificar
-            _ask_reboot_reason(boot_event_id, conn)
+            _notify_reboot(boot_event_id, clean)
         else:
             log.info(f"▶ Primeira execução — boot {boot_time}")
 

@@ -100,13 +100,18 @@ Ao iniciar após um reboot, o monitor combina duas estratégias para classificar
 
 **Detecção de shutdown limpo (automática):** ao ser encerrado normalmente — via Ctrl+C ou pelo Task Scheduler — o monitor cria um arquivo `.clean_shutdown` na pasta. Se esse arquivo não existir na próxima inicialização, significa que o processo foi interrompido abruptamente, o que indica um possível crash.
 
-**Prompt de classificação (manual):** independentemente da detecção automática, uma janela popup é exibida perguntando se a reinicialização foi intencional. As opções são:
+**Notificação toast (Windows nativa):** ao detectar um reboot, o monitor envia uma notificação toast nativa do Windows avisando o evento e orientando o usuário a classificá-lo. Não requer nenhuma dependência extra — usa PowerShell nativo.
 
-- **Sim** → marcado como `intencional` no banco
-- **Não** → marcado como `crash`
-- **Cancelar** → marcado como `desconhecido`
+**Classificação manual via `classify_reboot.py`:** abre uma janela para classificar o último reboot pendente no banco.
 
-O dashboard reflete essa classificação com badges coloridos na tabela de reinicializações: 💥 Crash, ✋ Intencional e ❓ Desconhecido. O contador de reinicializações no topo do dashboard conta apenas os crashes confirmados.
+```powershell
+python classify_reboot.py
+
+# Banco em outro caminho
+python classify_reboot.py --db D:\backups\monitor.db
+```
+
+As opções são **Crash (inesperado)**, **Intencional (manual)** ou **Pular**. O dashboard reflete essa classificação com badges coloridos: 💥 Crash, ✋ Intencional e ❓ Desconhecido. O contador de reinicializações no topo conta apenas os crashes confirmados.
 
 ---
 
@@ -156,6 +161,7 @@ Examina os minutos antes de cada crash e calcula médias e máximos de cada mét
 acer-crash-monitor/
 ├── libs/                   # DLLs do LibreHardwareMonitor (não versionado)
 ├── monitor.py              # Daemon principal de coleta
+├── classify_reboot.py      # Classificação manual de reboots pendentes
 ├── lhm_reader.py           # Teste isolado de leitura de temperatura
 ├── dashboard.py            # Gerador do relatório HTML
 ├── analyze.py              # Análise de padrões pré-crash
