@@ -113,20 +113,40 @@ O dashboard reflete essa classificação com badges coloridos na tabela de reini
 ## Dashboard
 
 ```powershell
+# Uso padrão
 python dashboard.py
+
+# Banco em outro caminho
+python dashboard.py --db D:\backups\monitor.db
+
+# Gerar sem abrir o navegador
+python dashboard.py --no-open
+
+# Caminho de saída personalizado
+python dashboard.py --output relatorio.html
 ```
 
-Gera e abre automaticamente um `dashboard.html` com gráficos de temperatura, CPU e RAM ao longo do tempo, histórico de reinicializações e alertas registrados.
+Gera um `dashboard.html` com gráficos de temperatura, CPU e RAM ao longo do tempo, histórico de reinicializações e alertas registrados.
 
 ---
 
 ## Análise de padrões
 
 ```powershell
+# Uso padrão (5 min de janela, todos os reboots)
 python analyze.py
+
+# Janela de 10 minutos antes de cada reboot
+python analyze.py --window 10
+
+# Apenas crashes confirmados
+python analyze.py --only-crashes
+
+# Banco em outro caminho
+python analyze.py --db D:\backups\monitor.db
 ```
 
-Examina os **5 minutos antes de cada crash** e calcula médias e máximos de cada métrica, sinalizando prováveis causas como superaquecimento, CPU saturada ou bateria crítica.
+Examina os minutos antes de cada crash e calcula médias e máximos de cada métrica, sinalizando prováveis causas como superaquecimento, CPU saturada ou bateria crítica.
 
 ---
 
