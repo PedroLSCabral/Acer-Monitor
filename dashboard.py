@@ -2,29 +2,53 @@
 """
 Acer Aspire 5 — Dashboard de Análise
 Gera um relatório HTML a partir do banco de dados.
-Uso: python3 dashboard.py
-Abre o arquivo dashboard.html no navegador.
+
+Uso:
+    python dashboard.py
+    python dashboard.py --db C:\outro\caminho\monitor.db
+    python dashboard.py --db monitor.db --output relatorio.html --no-open
 """
 
 import sqlite3
 import json
 import sys
+import argparse
 import webbrowser
 from pathlib import Path
 from datetime import datetime
 
 BASE_DIR = Path(__file__).parent
-DB_PATH = BASE_DIR / "monitor.db"
-OUT_PATH = BASE_DIR / "dashboard.html"
 
 
-def load_data():
-    if not DB_PATH.exists():
-        print(f"Banco não encontrado: {DB_PATH}")
-        print("Rode primeiro: python3 monitor.py")
+def parse_args():
+    parser = argparse.ArgumentParser(description="Acer Crash Monitor — Dashboard")
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=BASE_DIR / "monitor.db",
+        help="Caminho para o banco de dados (padrão: monitor.db)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=BASE_DIR / "dashboard.html",
+        help="Caminho do HTML gerado (padrão: dashboard.html)",
+    )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Não abre o navegador automaticamente",
+    )
+    return parser.parse_args()
+
+
+def load_data(db_path):
+    if not db_path.exists():
+        print(f"Banco não encontrado: {db_path}")
+        print("Rode primeiro: python monitor.py")
         sys.exit(1)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
     snapshots = conn.execute("""
@@ -493,12 +517,14 @@ new Chart(document.getElementById('ramChart'), {{
 
 
 def main():
-    print(f"Carregando dados de {DB_PATH}...")
-    snapshots, boots, alerts, stats = load_data()
+    args = parse_args()
+    print(f"Carregando dados de {args.db}...")
+    snapshots, boots, alerts, stats = load_data(args.db)
     html = generate_html(snapshots, boots, alerts, stats)
-    OUT_PATH.write_text(html, encoding="utf-8")
-    print(f"Dashboard gerado: {OUT_PATH}")
-    webbrowser.open(str(OUT_PATH))
+    args.output.write_text(html, encoding="utf-8")
+    print(f"Dashboard gerado: {args.output}")
+    if not args.no_open:
+        webbrowser.open(str(args.output))
 
 
 if __name__ == "__main__":

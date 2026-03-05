@@ -3,24 +3,62 @@
 Acer Aspire 5 — Análise de Padrões de Reinicialização
 Examina os dados coletados e identifica o que acontecia
 nos minutos ANTES de cada reinicialização.
+
+Uso:
+    python analyze.py
+    python analyze.py --db C:\outro\caminho\monitor.db
+    python analyze.py --window 10
+    python analyze.py --only-crashes
 """
 
 import sqlite3
 import json
+import argparse
 from pathlib import Path
 from datetime import datetime, timedelta
 
-DB_PATH = Path(__file__).parent / "monitor.db"
-WINDOW_MINUTES = 5  # janela de análise antes do reboot
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Acer Crash Monitor — Análise de padrões")
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=Path(__file__).parent / "monitor.db",
+        help="Caminho para o banco de dados (padrão: monitor.db)",
+    )
+    parser.add_argument(
+        "--window",
+        type=int,
+        default=5,
+        metavar="MINUTOS",
+        help="Janela de análise antes de cada reboot em minutos (padrão: 5)",
+    )
+    parser.add_argument(
+        "--only-crashes",
+        action="store_true",
+        help="Analisa apenas reinicializações classificadas como crash",
+    )
+    return parser.parse_args()
 
 
 def main():
-    conn = sqlite3.connect(DB_PATH)
+    args = parse_args()
+
+    if not args.db.exists():
+        print(f"Banco não encontrado: {args.db}")
+        print("Rode primeiro: python monitor.py")
+        return
+
+    conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
 
-    boots = conn.execute("""
+    where = "WHERE notes != 'Primeira execução'"
+    if args.only_crashes:
+        where = "WHERE kind = 'crash'"
+
+    boots = conn.execute(f"""
         SELECT * FROM boot_events
-        WHERE notes != 'Primeira execução'
+        {where}
         ORDER BY ts
     """).fetchall()
 
@@ -31,6 +69,9 @@ def main():
 
     print(f"{'='*60}")
     print(f"  Análise: {len(boots)} reinicializações encontradas")
+    print(f"  Janela:  {args.window} minutos antes de cada reboot")
+    if args.only_crashes:
+        print("  Filtro:  apenas crashes confirmados")
     print(f"{'='*60}\n")
 
     summaries = []
@@ -40,9 +81,8 @@ def main():
         if not last_snap:
             continue
 
-        # Pega snapshots dos WINDOW_MINUTES minutos antes
         window_start = (
-            datetime.fromisoformat(last_snap) - timedelta(minutes=WINDOW_MINUTES)
+            datetime.fromisoformat(last_snap) - timedelta(minutes=args.window)
         ).isoformat()
 
         snaps = conn.execute("""
@@ -74,7 +114,7 @@ def main():
         summaries.append(summary)
 
         print(f"Reinício em: {boot['ts'][:19]}")
-        print(f"  Janela: {WINDOW_MINUTES} min antes ({len(snaps)} amostras)")
+        print(f"  Janela: {args.window} min antes ({len(snaps)} amostras)")
         if summary["cpu_avg"]:
             print(f"  CPU    — média: {summary['cpu_avg']:.1f}%  |  máx: {summary['cpu_max']:.1f}%")
         if summary["temp_avg"]:
