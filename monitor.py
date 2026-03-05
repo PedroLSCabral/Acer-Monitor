@@ -175,19 +175,6 @@ def get_battery():
     return bat.percent, bat.power_plugged, secs
 
 
-# ── Top processos ─────────────────────────────────────────────
-def get_top_processes(n=None):
-    n = n or TOP_PROCS_N
-    procs = []
-    for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
-        try:
-            procs.append(p.info)
-        except Exception:
-            pass
-    procs.sort(key=lambda x: x.get("cpu_percent") or 0, reverse=True)
-    return procs[:n]
-
-
 # ── Banco de dados ────────────────────────────────────────────
 def init_db(conn):
     conn.executescript("""
@@ -347,65 +334,84 @@ def detect_reboot(conn):
     _clear_shutdown_flag()
 
 
-# ── Coleta ────────────────────────────────────────────────────
-def collect_snapshot():
-    now    = datetime.now().isoformat()
-    uptime = time.time() - psutil.boot_time()
-
+# ── Coletores individuais ─────────────────────────────────────
+def collect_cpu():
     cpu_pct      = psutil.cpu_percent(interval=1)
     cpu_freq     = psutil.cpu_freq()
     cpu_freq_mhz = cpu_freq.current if cpu_freq else None
+    return {"cpu_pct": cpu_pct, "cpu_freq_mhz": cpu_freq_mhz}
 
+
+def collect_memory():
     mem  = psutil.virtual_memory()
     swap = psutil.swap_memory()
+    return {
+        "ram_total_mb": mem.total / 1e6,
+        "ram_used_mb":  mem.used  / 1e6,
+        "ram_pct":      mem.percent,
+        "swap_pct":     swap.percent,
+    }
 
+
+def collect_disk():
+    result = {"disk_pct": None, "disk_read_mb": None, "disk_write_mb": None}
     try:
-        disk_pct = psutil.disk_usage(DISK_PATH).percent
+        result["disk_pct"] = psutil.disk_usage(DISK_PATH).percent
     except Exception:
-        disk_pct = None
-
+        pass
     try:
-        io         = psutil.disk_io_counters()
-        disk_read  = io.read_bytes  / 1e6 if io else None
-        disk_write = io.write_bytes / 1e6 if io else None
+        io = psutil.disk_io_counters()
+        if io:
+            result["disk_read_mb"]  = io.read_bytes  / 1e6
+            result["disk_write_mb"] = io.write_bytes / 1e6
     except Exception:
-        disk_read = disk_write = None
+        pass
+    return result
 
+
+def collect_network():
     try:
-        net      = psutil.net_io_counters()
-        net_sent = net.bytes_sent / 1e6
-        net_recv = net.bytes_recv / 1e6
+        net = psutil.net_io_counters()
+        return {"net_sent_mb": net.bytes_sent / 1e6, "net_recv_mb": net.bytes_recv / 1e6}
     except Exception:
-        net_sent = net_recv = None
+        return {"net_sent_mb": None, "net_recv_mb": None}
 
+
+def collect_processes():
+    procs = []
+    for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
+        try:
+            procs.append(p.info)
+        except Exception:
+            pass
+    procs.sort(key=lambda x: x.get("cpu_percent") or 0, reverse=True)
+    return {
+        "proc_count":    len(psutil.pids()),
+        "proc_top_json": json.dumps(procs[:TOP_PROCS_N]),
+    }
+
+
+# ── Snapshot agregado ─────────────────────────────────────────
+def collect_snapshot():
     bat_pct, bat_plugged, bat_secs = get_battery()
     cpu_temp, gpu_temp, temps      = get_temps_lhm()
-    top_procs                      = get_top_processes()
-    proc_count                     = len(psutil.pids())
 
-    return {
-        "ts":              now,
-        "uptime_s":        uptime,
-        "cpu_pct":         cpu_pct,
-        "cpu_freq_mhz":    cpu_freq_mhz,
+    snap = {
+        "ts":              datetime.now().isoformat(),
+        "uptime_s":        time.time() - psutil.boot_time(),
         "cpu_temp":        cpu_temp,
-        "ram_total_mb":    mem.total / 1e6,
-        "ram_used_mb":     mem.used  / 1e6,
-        "ram_pct":         mem.percent,
-        "swap_pct":        swap.percent,
-        "disk_read_mb":    disk_read,
-        "disk_write_mb":   disk_write,
-        "disk_pct":        disk_pct,
-        "net_sent_mb":     net_sent,
-        "net_recv_mb":     net_recv,
+        "gpu_temp":        gpu_temp,
+        "temps_json":      json.dumps(temps),
         "battery_pct":     bat_pct,
         "battery_plugged": int(bat_plugged) if bat_plugged is not None else None,
         "battery_secs":    bat_secs,
-        "temps_json":      json.dumps(temps),
-        "gpu_temp":        gpu_temp,
-        "proc_count":      proc_count,
-        "proc_top_json":   json.dumps(top_procs),
     }
+    snap.update(collect_cpu())
+    snap.update(collect_memory())
+    snap.update(collect_disk())
+    snap.update(collect_network())
+    snap.update(collect_processes())
+    return snap
 
 
 def save_snapshot(conn, snap):
