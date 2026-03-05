@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+"""
+Acer Aspire 5 — Monitor de Reinicializações (Windows 11)
+Usa LibreHardwareMonitor via DLL (pythonnet) — sem WMI, sem programa externo.
+
+Requisitos:
+    pip install psutil pythonnet
+
+A DLL LibreHardwareMonitorLib.dll deve estar na mesma pasta deste script.
+Como obter: extraia o .zip do LibreHardwareMonitor e copie a DLL para cá.
+
+Rodar em background (sem janela):
+    pythonw monitor.py
+
+Ou configure o autostart via Task Scheduler — veja README.md
+"""
+
+import sqlite3
+import time
+import os
+import sys
+import json
+import signal
+import logging
+import platform
+from datetime import datetime
+from pathlib import Path
+
+try:
+    import psutil
+except ImportError:
+    print("Instale psutil: pip install psutil")
+    sys.exit(1)
+
+# ── Configuração ──────────────────────────────────────────────
+BASE_DIR = Path(__file__).parent
+DB_PATH  = BASE_DIR / "monitor.db"
+LOG_PATH = BASE_DIR / "monitor.log"
+INTERVAL = 5  # segundos entre coletas
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_PATH, encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+log = logging.getLogger("AcerMonitor")
+
+
+# ── LibreHardwareMonitor via pythonnet ────────────────────────
+_lhm_computer = None
+
+def _find_dll():
+    candidates = [
+        BASE_DIR / "LibreHardwareMonitorLib.dll",
+        Path.home() / "acer_monitor" / "LibreHardwareMonitorLib.dll",
+    ]
+    winget = Path.home() / "AppData/Local/Microsoft/WinGet/Packages"
+    if winget.exists():
+        for dll in winget.rglob("LibreHardwareMonitorLib.dll"):
+            candidates.append(dll)
+    for p in candidates:
+        if p.is_file():
+            return p
+    return None
+
+
+def init_lhm():
+    global _lhm_computer
+    try:
+        import clr
+        dll = _find_dll()
+        if dll is None:
+            log.warning("LibreHardwareMonitorLib.dll não encontrada — temperatura desativada.")
+            log.warning(f"Copie a DLL para: {BASE_DIR}")
+            return False
+        clr.AddReference(str(dll))
+        from LibreHardwareMonitor.Hardware import Computer
+        c = Computer()
+        c.IsCpuEnabled         = True
+        c.IsGpuEnabled         = True
+        c.IsMemoryEnabled      = True
+        c.IsMotherboardEnabled = True
+        c.IsBatteryEnabled     = True
+        c.IsStorageEnabled     = True
+        c.Open()
+        _lhm_computer = c
+        log.info(f"LibreHardwareMonitor inicializado via DLL: {dll.name}")
+        return True
+    except ImportError:
+        log.warning("pythonnet não instalado — rode: pip install pythonnet")
+        return False
+    except Exception as e:
+        log.warning(f"Erro ao inicializar LHM: {e}")
+        return False
+
+
+def get_temps_lhm():
+    if _lhm_computer is None:
+        return None, None, {}
+    try:
+        temps    = {}
+        cpu_temp = None
+        gpu_temp = None
+
+        for hw in _lhm_computer.Hardware:
+            hw.Update()
+            for sub in hw.SubHardware:
+                sub.Update()
+
+            hw_type = str(hw.HardwareType)
+            hw_name = str(hw.Name)
+
+            def read_sensors(sensors, key):
+                nonlocal cpu_temp, gpu_temp
+                for s in sensors:
+                    if str(s.SensorType) != "Temperature":
+                        continue
+                    val = s.Value
+                    if val is None:
+                        continue
+                    val   = float(val)
+                    label = str(s.Name)
+                    if key not in temps:
+                        temps[key] = []
+                    temps[key].append({"label": label, "current": val, "hardware": hw_name})
+                    if "Cpu" in hw_type and (cpu_temp is None or "Package" in label):
+                        cpu_temp = val
+                    if "Gpu" in hw_type and gpu_temp is None:
+                        gpu_temp = val
+
+            read_sensors(hw.Sensors, hw_type)
+            for sub in hw.SubHardware:
+                read_sensors(sub.Sensors, f"{hw_type}/{sub.Name}")
+
+        return cpu_temp, gpu_temp, temps
+    except Exception as e:
+        log.error(f"Erro ao ler temperatura: {e}")
+        return None, None, {}
+
+
+# ── Bateria ───────────────────────────────────────────────────
+def get_battery():
+    bat = psutil.sensors_battery()
+    if not bat:
+        return None, None, None
+    secs = bat.secsleft
+    if secs == psutil.POWER_TIME_UNLIMITED:
+        secs = -1
+    return bat.percent, bat.power_plugged, secs
+
+
+# ── Top processos ─────────────────────────────────────────────
+def get_top_processes(n=5):
+    procs = []
+    for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
+        try:
+            procs.append(p.info)
+        except Exception:
+            pass
+    procs.sort(key=lambda x: x.get("cpu_percent") or 0, reverse=True)
+    return procs[:n]
+
+
+# ── Banco de dados ────────────────────────────────────────────
+def init_db(conn):
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS snapshots (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts              TEXT NOT NULL,
+            uptime_s        REAL,
+            cpu_pct         REAL,
+            cpu_freq_mhz    REAL,
+            cpu_temp        REAL,
+            ram_total_mb    REAL,
+            ram_used_mb     REAL,
+            ram_pct         REAL,
+            swap_pct        REAL,
+            disk_read_mb    REAL,
+            disk_write_mb   REAL,
+            disk_pct        REAL,
+            net_sent_mb     REAL,
+            net_recv_mb     REAL,
+            battery_pct     REAL,
+            battery_plugged INTEGER,
+            battery_secs    REAL,
+            temps_json      TEXT,
+            gpu_temp        REAL,
+            proc_count      INTEGER,
+            proc_top_json   TEXT
+        );
+        CREATE TABLE IF NOT EXISTS boot_events (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts           TEXT NOT NULL,
+            boot_time    TEXT,
+            last_snap_ts TEXT,
+            notes        TEXT
+        );
+        CREATE TABLE IF NOT EXISTS alerts (
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts      TEXT NOT NULL,
+            kind    TEXT,
+            value   REAL,
+            message TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_snap_ts ON snapshots(ts);
+        CREATE INDEX IF NOT EXISTS idx_boot_ts ON boot_events(ts);
+    """)
+    conn.commit()
+    log.info(f"Banco iniciado: {DB_PATH}")
+
+
+def detect_reboot(conn):
+    boot_time = datetime.fromtimestamp(psutil.boot_time()).isoformat()
+    last = conn.execute(
+        "SELECT boot_time FROM boot_events ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if last is None or last[0] != boot_time:
+        last_snap = conn.execute(
+            "SELECT ts FROM snapshots ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        note = "Reinicialização detectada" if last else "Primeira execução"
+        conn.execute(
+            "INSERT INTO boot_events (ts, boot_time, last_snap_ts, notes) VALUES (?,?,?,?)",
+            (datetime.now().isoformat(), boot_time,
+             last_snap[0] if last_snap else None, note)
+        )
+        conn.commit()
+        log.warning(f"{'🔄 REINICIALIZAÇÃO DETECTADA' if last else '▶ Primeira execução'} — boot {boot_time}")
+
+
+# ── Coleta ────────────────────────────────────────────────────
+def collect_snapshot():
+    now    = datetime.now().isoformat()
+    uptime = time.time() - psutil.boot_time()
+
+    cpu_pct      = psutil.cpu_percent(interval=1)
+    cpu_freq     = psutil.cpu_freq()
+    cpu_freq_mhz = cpu_freq.current if cpu_freq else None
+
+    mem  = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+
+    try:
+        disk_pct = psutil.disk_usage("C:\\").percent
+    except Exception:
+        disk_pct = None
+
+    try:
+        io         = psutil.disk_io_counters()
+        disk_read  = io.read_bytes  / 1e6 if io else None
+        disk_write = io.write_bytes / 1e6 if io else None
+    except Exception:
+        disk_read = disk_write = None
+
+    try:
+        net      = psutil.net_io_counters()
+        net_sent = net.bytes_sent / 1e6
+        net_recv = net.bytes_recv / 1e6
+    except Exception:
+        net_sent = net_recv = None
+
+    bat_pct, bat_plugged, bat_secs = get_battery()
+    cpu_temp, gpu_temp, temps      = get_temps_lhm()
+    top_procs                      = get_top_processes()
+    proc_count                     = len(psutil.pids())
+
+    return {
+        "ts":              now,
+        "uptime_s":        uptime,
+        "cpu_pct":         cpu_pct,
+        "cpu_freq_mhz":    cpu_freq_mhz,
+        "cpu_temp":        cpu_temp,
+        "ram_total_mb":    mem.total / 1e6,
+        "ram_used_mb":     mem.used  / 1e6,
+        "ram_pct":         mem.percent,
+        "swap_pct":        swap.percent,
+        "disk_read_mb":    disk_read,
+        "disk_write_mb":   disk_write,
+        "disk_pct":        disk_pct,
+        "net_sent_mb":     net_sent,
+        "net_recv_mb":     net_recv,
+        "battery_pct":     bat_pct,
+        "battery_plugged": int(bat_plugged) if bat_plugged is not None else None,
+        "battery_secs":    bat_secs,
+        "temps_json":      json.dumps(temps),
+        "gpu_temp":        gpu_temp,
+        "proc_count":      proc_count,
+        "proc_top_json":   json.dumps(top_procs),
+    }
+
+
+def save_snapshot(conn, snap):
+    conn.execute("""
+        INSERT INTO snapshots (
+            ts, uptime_s, cpu_pct, cpu_freq_mhz, cpu_temp,
+            ram_total_mb, ram_used_mb, ram_pct, swap_pct,
+            disk_read_mb, disk_write_mb, disk_pct,
+            net_sent_mb, net_recv_mb,
+            battery_pct, battery_plugged, battery_secs,
+            temps_json, gpu_temp, proc_count, proc_top_json
+        ) VALUES (
+            :ts, :uptime_s, :cpu_pct, :cpu_freq_mhz, :cpu_temp,
+            :ram_total_mb, :ram_used_mb, :ram_pct, :swap_pct,
+            :disk_read_mb, :disk_write_mb, :disk_pct,
+            :net_sent_mb, :net_recv_mb,
+            :battery_pct, :battery_plugged, :battery_secs,
+            :temps_json, :gpu_temp, :proc_count, :proc_top_json
+        )
+    """, snap)
+    conn.commit()
+
+
+def check_alerts(conn, snap):
+    alerts = []
+    if snap["cpu_temp"]:
+        if snap["cpu_temp"] > 90:
+            alerts.append(("temp", snap["cpu_temp"], f"CPU CRÍTICA: {snap['cpu_temp']:.0f}°C"))
+        elif snap["cpu_temp"] > 80:
+            alerts.append(("temp", snap["cpu_temp"], f"CPU alta: {snap['cpu_temp']:.0f}°C"))
+    if snap["cpu_pct"] and snap["cpu_pct"] > 95:
+        alerts.append(("cpu", snap["cpu_pct"], f"CPU: {snap['cpu_pct']:.0f}%"))
+    if snap["ram_pct"] and snap["ram_pct"] > 90:
+        alerts.append(("ram", snap["ram_pct"], f"RAM: {snap['ram_pct']:.0f}%"))
+    if snap["battery_pct"] is not None and snap["battery_pct"] < 5 and not snap["battery_plugged"]:
+        alerts.append(("battery", snap["battery_pct"], f"Bateria crítica: {snap['battery_pct']:.0f}%"))
+    for kind, value, msg in alerts:
+        conn.execute(
+            "INSERT INTO alerts (ts, kind, value, message) VALUES (?,?,?,?)",
+            (snap["ts"], kind, value, msg)
+        )
+        log.warning(f"⚠️  {msg}")
+    if alerts:
+        conn.commit()
+
+
+# ── Loop principal ─────────────────────────────────────────────
+running = True
+
+def handle_signal(sig, frame):
+    global running
+    log.info("Encerrando monitor...")
+    running = False
+
+signal.signal(signal.SIGINT,  handle_signal)
+signal.signal(signal.SIGTERM, handle_signal)
+
+
+def main():
+    log.info("=" * 60)
+    log.info("  Acer Aspire 5 — Monitor Windows 11 (pythonnet/LHM)")
+    log.info(f"  {platform.system()} {platform.release()}")
+    log.info(f"  Intervalo: {INTERVAL}s | DB: {DB_PATH}")
+    log.info("=" * 60)
+
+    conn = sqlite3.connect(DB_PATH)
+    init_db(conn)
+    detect_reboot(conn)
+    init_lhm()
+
+    counter = 0
+    while running:
+        try:
+            snap = collect_snapshot()
+            save_snapshot(conn, snap)
+            check_alerts(conn, snap)
+            counter += 1
+
+            if counter % 12 == 0:
+                temp_str = f"{snap['cpu_temp']:.0f}°C" if snap["cpu_temp"] else "N/A"
+                bat_str  = f"{snap['battery_pct']:.0f}%" if snap["battery_pct"] is not None else "N/A"
+                log.info(
+                    f"CPU {snap['cpu_pct']:.0f}% | "
+                    f"Temp {temp_str} | "
+                    f"RAM {snap['ram_pct']:.0f}% | "
+                    f"Bat {bat_str}"
+                )
+        except Exception as e:
+            log.error(f"Erro na coleta: {e}")
+
+        time.sleep(INTERVAL)
+
+    if _lhm_computer:
+        _lhm_computer.Close()
+    conn.close()
+    log.info("Monitor encerrado.")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Importar no Task Scheduler do Windows para iniciar o monitor automaticamente.
+
+  Como importar:
+  1. Abra o Task Scheduler (Agendador de Tarefas)
+  2. Clique em "Import Task..." no painel direito
+  3. Selecione este arquivo .xml
+  4. Ajuste o caminho em <Command> e <WorkingDirectory> para o local correto
+  5. Clique OK
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Acer Aspire 5 — Monitor de Reinicializações em background</Description>
+    <Author>AcerMonitor</Author>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <!-- Inicia automaticamente no login -->
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+      <!-- HighestAvailable permite leitura de temperatura via WMI -->
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <!-- PT0S = sem limite de tempo de execução -->
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>999</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions>
+    <Exec>
+      <!--
+        AJUSTE ESTES CAMINHOS:
+        Troque C:\Users\SEU_USUARIO\acer_monitor pelo caminho real da pasta
+      -->
+      <Command>pythonw.exe</Command>
+      <Arguments>monitor.py</Arguments>
+      <WorkingDirectory>C:\Users\Pedro\Pessoal\SoftwareMonitor</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
