@@ -11,6 +11,8 @@ Monitor de sistema em background para investigar reinicializações aleatórias 
 - Coleta contínua de métricas do sistema (CPU, RAM, disco, rede, bateria)
 - Leitura de temperatura via `LibreHardwareMonitorLib.dll` (sem WMI, sem programa externo)
 - Detecção automática de reinicializações ao iniciar
+- **Classificação de reinicializações** — distingue crashes de desligamentos intencionais
+- **Detecção de shutdown limpo** — identifica automaticamente se o monitor foi encerrado normalmente ou abruptamente
 - Alertas registrados quando CPU/temperatura/RAM passam de limites críticos
 - Dashboard HTML com gráficos interativos
 - Script de análise que examina o que acontecia nos minutos antes de cada crash
@@ -91,6 +93,22 @@ Ou importe o arquivo `AcerMonitor_Task.xml` diretamente no **Agendador de Tarefa
 
 ---
 
+## Classificação de reinicializações
+
+Ao iniciar após um reboot, o monitor combina duas estratégias para classificar o evento:
+
+**Detecção de shutdown limpo (automática):** ao ser encerrado normalmente — via Ctrl+C ou pelo Task Scheduler — o monitor cria um arquivo `.clean_shutdown` na pasta. Se esse arquivo não existir na próxima inicialização, significa que o processo foi interrompido abruptamente, o que indica um possível crash.
+
+**Prompt de classificação (manual):** independentemente da detecção automática, uma janela popup é exibida perguntando se a reinicialização foi intencional. As opções são:
+
+- **Sim** → marcado como `intencional` no banco
+- **Não** → marcado como `crash`
+- **Cancelar** → marcado como `desconhecido`
+
+O dashboard reflete essa classificação com badges coloridos na tabela de reinicializações: 💥 Crash, ✋ Intencional e ❓ Desconhecido. O contador de reinicializações no topo do dashboard conta apenas os crashes confirmados.
+
+---
+
 ## Dashboard
 
 ```powershell
@@ -129,6 +147,7 @@ Arquivos gerados em tempo de execução (ignorados pelo git):
 ├── monitor.db              # Banco SQLite com todos os dados
 ├── monitor.log             # Log de execução
 ├── dashboard.html          # Relatório gerado
+├── .clean_shutdown         # Flag de encerramento limpo (criado/removido automaticamente)
 └── *.dll                   # DLLs do LibreHardwareMonitor
 ```
 
@@ -177,6 +196,12 @@ SELECT b.ts, b.notes,
        (SELECT battery_plugged FROM snapshots
         WHERE ts <= b.last_snap_ts ORDER BY ts DESC LIMIT 1) as plugged
 FROM boot_events b;
+
+-- Apenas crashes confirmados
+SELECT ts, boot_time, last_snap_ts, notes
+FROM boot_events
+WHERE kind = 'crash'
+ORDER BY ts DESC;
 ```
 
 ---

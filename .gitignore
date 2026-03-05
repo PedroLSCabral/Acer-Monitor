@@ -2,6 +2,7 @@
 monitor.db
 monitor.log
 dashboard.html
+.clean_shutdown
 
 # DLLs do LibreHardwareMonitor — binários de terceiros
 *.dll
