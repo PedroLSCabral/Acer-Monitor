@@ -29,7 +29,7 @@ def load_data():
 
     snapshots = conn.execute("""
         SELECT ts, cpu_pct, cpu_temp, ram_pct, swap_pct,
-               battery_pct, battery_plugged, load_1,
+               battery_pct, battery_plugged,
                proc_count, gpu_temp
         FROM snapshots
         ORDER BY ts DESC
