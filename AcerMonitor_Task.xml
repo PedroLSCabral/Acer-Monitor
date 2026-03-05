@@ -1,30 +1,29 @@
 <?xml version="1.0" encoding="UTF-16"?>
 <!--
-  Importar no Task Scheduler do Windows para iniciar o monitor automaticamente.
+  Importar no Task Scheduler do Windows para iniciar o watchdog automaticamente.
+  O watchdog por sua vez gerencia o monitor.py, reiniciando-o se necessário.
 
   Como importar:
   1. Abra o Task Scheduler (Agendador de Tarefas)
   2. Clique em "Import Task..." no painel direito
   3. Selecione este arquivo .xml
-  4. Ajuste o caminho em <Command> e <WorkingDirectory> para o local correto
+  4. Ajuste o caminho em <WorkingDirectory> para o local correto
   5. Clique OK
 -->
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>Acer Aspire 5 — Monitor de Reinicializações em background</Description>
+    <Description>Acer Aspire 5 — Watchdog do Monitor de Reinicializações</Description>
     <Author>AcerMonitor</Author>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>
       <Enabled>true</Enabled>
-      <!-- Inicia automaticamente no login -->
     </LogonTrigger>
   </Triggers>
   <Principals>
     <Principal id="Author">
       <LogonType>InteractiveToken</LogonType>
       <RunLevel>HighestAvailable</RunLevel>
-      <!-- HighestAvailable permite leitura de temperatura via WMI -->
     </Principal>
   </Principals>
   <Settings>
@@ -32,7 +31,6 @@
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <!-- PT0S = sem limite de tempo de execução -->
     <RestartOnFailure>
       <Interval>PT1M</Interval>
       <Count>999</Count>
@@ -41,12 +39,12 @@
   <Actions>
     <Exec>
       <!--
-        AJUSTE ESTES CAMINHOS:
-        Troque C:\Users\SEU_USUARIO\acer_monitor pelo caminho real da pasta
+        AJUSTE ESTE CAMINHO:
+        Troque C:\Users\SEU_USUARIO\acer-crash-monitor pelo caminho real da pasta
       -->
       <Command>pythonw.exe</Command>
-      <Arguments>monitor.py</Arguments>
-      <WorkingDirectory>C:\Users\Pedro\Pessoal\SoftwareMonitor</WorkingDirectory>
+      <Arguments>watchdog.py</Arguments>
+      <WorkingDirectory>C:\Users\SEU_USUARIO\acer-crash-monitor</WorkingDirectory>
     </Exec>
   </Actions>
 </Task>

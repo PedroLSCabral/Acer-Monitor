@@ -78,11 +78,13 @@ pythonw monitor.py
 
 ### Iniciar automaticamente com o Windows (recomendado)
 
+O `watchdog.py` é o processo que deve ser registrado no Task Scheduler. Ele inicia o `monitor.py` e o reinicia automaticamente se ele travar ou encerrar inesperadamente.
+
 Via PowerShell como Administrador:
 
 ```powershell
 $dir = "C:\Users\$env:USERNAME\acer-crash-monitor"
-$action = New-ScheduledTaskAction -Execute "pythonw.exe" -Argument "monitor.py" -WorkingDirectory $dir
+$action = New-ScheduledTaskAction -Execute "pythonw.exe" -Argument "watchdog.py" -WorkingDirectory $dir
 $trigger = New-ScheduledTaskTrigger -AtLogon
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
 Register-ScheduledTask -TaskName "AcerMonitor" -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest
@@ -90,7 +92,7 @@ Register-ScheduledTask -TaskName "AcerMonitor" -Action $action -Trigger $trigger
 
 Ou importe o arquivo `AcerMonitor_Task.xml` diretamente no **Agendador de Tarefas** (Task Scheduler), ajustando o caminho da pasta.
 
-> O monitor precisa rodar como Administrador para ler temperaturas via DLL.
+> O watchdog e o monitor precisam rodar como Administrador para ler temperaturas via DLL.
 
 ---
 
@@ -161,10 +163,12 @@ Examina os minutos antes de cada crash e calcula médias e máximos de cada mét
 acer-crash-monitor/
 ├── libs/                   # DLLs do LibreHardwareMonitor (não versionado)
 ├── monitor.py              # Daemon principal de coleta
+├── watchdog.py             # Mantém o monitor.py sempre em execução
 ├── classify_reboot.py      # Classificação manual de reboots pendentes
 ├── lhm_reader.py           # Teste isolado de leitura de temperatura
 ├── dashboard.py            # Gerador do relatório HTML
 ├── analyze.py              # Análise de padrões pré-crash
+├── config.json             # Configurações de thresholds e caminhos
 ├── AcerMonitor_Task.xml    # Configuração do Task Scheduler
 └── README.md
 ```

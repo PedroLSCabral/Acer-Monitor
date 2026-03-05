@@ -2,6 +2,7 @@
 config.local.json
 monitor.db
 monitor.log
+watchdog.log
 dashboard.html
 .clean_shutdown
 
