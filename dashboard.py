@@ -73,7 +73,15 @@ def generate_html(snapshots, boots, alerts, stats):
 
     boot_rows = ""
     for b in boots:
-        badge = '<span class="badge danger">⚡ REINÍCIO</span>' if b["notes"] != "Primeira execução" else '<span class="badge ok">▶ Início</span>'
+        kind = b["kind"] if b["kind"] else "desconhecido"
+        if kind == "crash":
+            badge = '<span class="badge danger">💥 CRASH</span>'
+        elif kind == "intencional":
+            badge = '<span class="badge ok">✋ Intencional</span>'
+        elif b["notes"] == "Primeira execução":
+            badge = '<span class="badge ok">▶ Início</span>'
+        else:
+            badge = '<span class="badge warn">❓ Desconhecido</span>'
         boot_rows += f"""
         <tr>
             <td>{b['ts'][:19]}</td>
@@ -93,7 +101,7 @@ def generate_html(snapshots, boots, alerts, stats):
             <td>{a['message']}</td>
         </tr>"""
 
-    total_boots = len([b for b in boots if b["notes"] != "Primeira execução"])
+    total_boots = len([b for b in boots if b["kind"] == "crash"])
     monitoring_hours = 0
     if stats and stats["first_ts"] and stats["last_ts"]:
         t1 = datetime.fromisoformat(stats["first_ts"])

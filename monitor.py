@@ -23,6 +23,9 @@ import json
 import signal
 import logging
 import platform
+import threading
+import tkinter as tk
+from tkinter import simpledialog, messagebox
 from datetime import datetime
 from pathlib import Path
 
@@ -33,10 +36,11 @@ except ImportError:
     sys.exit(1)
 
 # ── Configuração ──────────────────────────────────────────────
-BASE_DIR = Path(__file__).parent
-DB_PATH  = BASE_DIR / "monitor.db"
-LOG_PATH = BASE_DIR / "monitor.log"
-INTERVAL = 5  # segundos entre coletas
+BASE_DIR      = Path(__file__).parent
+DB_PATH       = BASE_DIR / "monitor.db"
+LOG_PATH      = BASE_DIR / "monitor.log"
+SHUTDOWN_FLAG = BASE_DIR / ".clean_shutdown"  # existe → último shutdown foi limpo
+INTERVAL      = 5  # segundos entre coletas
 
 logging.basicConfig(
     level=logging.INFO,
@@ -196,6 +200,7 @@ def init_db(conn):
             ts           TEXT NOT NULL,
             boot_time    TEXT,
             last_snap_ts TEXT,
+            kind         TEXT DEFAULT 'desconhecido',  -- 'crash', 'intencional', 'desconhecido'
             notes        TEXT
         );
         CREATE TABLE IF NOT EXISTS alerts (
@@ -212,23 +217,114 @@ def init_db(conn):
     log.info(f"Banco iniciado: {DB_PATH}")
 
 
+def _was_clean_shutdown():
+    """Retorna True se o último encerramento foi limpo (arquivo de flag existe)."""
+    return SHUTDOWN_FLAG.exists()
+
+
+def _mark_clean_shutdown():
+    """Cria o arquivo de flag de shutdown limpo."""
+    SHUTDOWN_FLAG.write_text(datetime.now().isoformat(), encoding="utf-8")
+
+
+def _clear_shutdown_flag():
+    """Remove o arquivo de flag (chamado no início de cada sessão)."""
+    try:
+        SHUTDOWN_FLAG.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _ask_reboot_reason(boot_event_id, conn):
+    """
+    Abre um popup perguntando se a reinicialização foi intencional.
+    Roda em thread separada para não bloquear a coleta.
+    """
+    def ask():
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+
+            answer = messagebox.askyesnocancel(
+                "Acer Crash Monitor",
+                "Uma reinicialização foi detectada.\n\n"
+                "Foi uma reinicialização INTENCIONAL\n"
+                "(você mesmo reiniciou ou desligou o PC)?\n\n"
+                "  Sim  → Intencional (manual)\n"
+                "  Não  → Crash / reinicialização inesperada\n"
+                "  Cancelar → Não sei / pular",
+                icon="question"
+            )
+            root.destroy()
+
+            if answer is True:
+                kind = "intencional"
+                note = "Reinicialização manual pelo usuário"
+            elif answer is False:
+                kind = "crash"
+                note = "Crash / reinicialização inesperada (confirmado pelo usuário)"
+            else:
+                kind = "desconhecido"
+                note = "Reinicialização detectada — tipo não informado"
+
+            conn.execute(
+                "UPDATE boot_events SET kind = ?, notes = ? WHERE id = ?",
+                (kind, note, boot_event_id)
+            )
+            conn.commit()
+            log.info(f"Reinicialização classificada como: {kind}")
+
+        except Exception as e:
+            log.warning(f"Erro ao exibir popup de classificação: {e}")
+
+    threading.Thread(target=ask, daemon=True).start()
+
+
 def detect_reboot(conn):
     boot_time = datetime.fromtimestamp(psutil.boot_time()).isoformat()
     last = conn.execute(
         "SELECT boot_time FROM boot_events ORDER BY id DESC LIMIT 1"
     ).fetchone()
+
     if last is None or last[0] != boot_time:
         last_snap = conn.execute(
             "SELECT ts FROM snapshots ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        note = "Reinicialização detectada" if last else "Primeira execução"
-        conn.execute(
-            "INSERT INTO boot_events (ts, boot_time, last_snap_ts, notes) VALUES (?,?,?,?)",
+
+        is_first = last is None
+        clean    = _was_clean_shutdown()
+
+        if is_first:
+            kind = "desconhecido"
+            note = "Primeira execução"
+        elif clean:
+            # Shutdown limpo: provavelmente intencional, mas pergunta mesmo assim
+            kind = "desconhecido"
+            note = "Reinicialização após encerramento limpo do monitor"
+        else:
+            # Sem flag de shutdown → processo foi interrompido abruptamente
+            kind = "desconhecido"
+            note = "Reinicialização detectada — monitor não foi encerrado normalmente (possível crash)"
+
+        cursor = conn.execute(
+            "INSERT INTO boot_events (ts, boot_time, last_snap_ts, kind, notes) VALUES (?,?,?,?,?)",
             (datetime.now().isoformat(), boot_time,
-             last_snap[0] if last_snap else None, note)
+             last_snap[0] if last_snap else None, kind, note)
         )
         conn.commit()
-        log.warning(f"{'🔄 REINICIALIZAÇÃO DETECTADA' if last else '▶ Primeira execução'} — boot {boot_time}")
+        boot_event_id = cursor.lastrowid
+
+        if not is_first:
+            flag_str = "✅ encerramento limpo anterior" if clean else "⚠️  sem flag de shutdown"
+            log.warning(f"🔄 REINICIALIZAÇÃO DETECTADA ({flag_str}) — boot {boot_time}")
+            # Abre popup para o usuário classificar
+            _ask_reboot_reason(boot_event_id, conn)
+        else:
+            log.info(f"▶ Primeira execução — boot {boot_time}")
+
+    # Remove flag para a próxima sessão detectar corretamente
+    _clear_shutdown_flag()
 
 
 # ── Coleta ────────────────────────────────────────────────────
@@ -385,7 +481,8 @@ def main():
     if _lhm_computer:
         _lhm_computer.Close()
     conn.close()
-    log.info("Monitor encerrado.")
+    _mark_clean_shutdown()
+    log.info("Monitor encerrado limpo.")
 
 
 if __name__ == "__main__":
