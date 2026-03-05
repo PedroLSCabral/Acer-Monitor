@@ -1,0 +1,24 @@
+{
+  "interval_seconds": 5,
+
+  "paths": {
+    "database": "monitor.db",
+    "log": "monitor.log",
+    "dll_dir": "libs",
+    "shutdown_flag": ".clean_shutdown",
+    "disk": "C:\\"
+  },
+
+  "alerts": {
+    "cpu_temp_warning":  80,
+    "cpu_temp_critical": 90,
+    "cpu_pct_critical":  95,
+    "ram_pct_critical":  90,
+    "battery_pct_low":    5
+  },
+
+  "collection": {
+    "top_processes": 5,
+    "log_every_n_snapshots": 12
+  }
+}

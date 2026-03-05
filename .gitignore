@@ -1,4 +1,5 @@
-# Dados gerados pelo monitor — não versionar
+# Configuração local (sobrescreve config.json, não versionar)
+config.local.json
 monitor.db
 monitor.log
 dashboard.html

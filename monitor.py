@@ -36,12 +36,34 @@ except ImportError:
     sys.exit(1)
 
 # ── Configuração ──────────────────────────────────────────────
-BASE_DIR      = Path(__file__).parent
-DLL_DIR       = BASE_DIR / "libs"             # pasta para DLLs do LibreHardwareMonitor
-DB_PATH       = BASE_DIR / "monitor.db"
-LOG_PATH      = BASE_DIR / "monitor.log"
-SHUTDOWN_FLAG = BASE_DIR / ".clean_shutdown"  # existe → último shutdown foi limpo
-INTERVAL      = 5  # segundos entre coletas
+BASE_DIR = Path(__file__).parent
+
+def _load_config():
+    config_path = BASE_DIR / "config.json"
+    if not config_path.exists():
+        print(f"config.json não encontrado em {BASE_DIR} — usando valores padrão.")
+        return {}
+    with open(config_path, encoding="utf-8") as f:
+        return json.load(f)
+
+CFG           = _load_config()
+DLL_DIR       = BASE_DIR / CFG.get("paths", {}).get("dll_dir", "libs")
+DB_PATH       = BASE_DIR / CFG.get("paths", {}).get("database", "monitor.db")
+LOG_PATH      = BASE_DIR / CFG.get("paths", {}).get("log", "monitor.log")
+SHUTDOWN_FLAG = BASE_DIR / CFG.get("paths", {}).get("shutdown_flag", ".clean_shutdown")
+DISK_PATH     = CFG.get("paths", {}).get("disk", "C:\\")
+INTERVAL      = CFG.get("interval_seconds", 5)
+
+_alerts       = CFG.get("alerts", {})
+TEMP_WARN     = _alerts.get("cpu_temp_warning",  80)
+TEMP_CRIT     = _alerts.get("cpu_temp_critical", 90)
+CPU_CRIT      = _alerts.get("cpu_pct_critical",  95)
+RAM_CRIT      = _alerts.get("ram_pct_critical",  90)
+BAT_LOW       = _alerts.get("battery_pct_low",    5)
+
+_collection       = CFG.get("collection", {})
+TOP_PROCS_N       = _collection.get("top_processes", 5)
+LOG_EVERY_N       = _collection.get("log_every_n_snapshots", 12)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -154,7 +176,8 @@ def get_battery():
 
 
 # ── Top processos ─────────────────────────────────────────────
-def get_top_processes(n=5):
+def get_top_processes(n=None):
+    n = n or TOP_PROCS_N
     procs = []
     for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
         try:
@@ -337,7 +360,7 @@ def collect_snapshot():
     swap = psutil.swap_memory()
 
     try:
-        disk_pct = psutil.disk_usage("C:\\").percent
+        disk_pct = psutil.disk_usage(DISK_PATH).percent
     except Exception:
         disk_pct = None
 
@@ -409,15 +432,15 @@ def save_snapshot(conn, snap):
 def check_alerts(conn, snap):
     alerts = []
     if snap["cpu_temp"]:
-        if snap["cpu_temp"] > 90:
+        if snap["cpu_temp"] > TEMP_CRIT:
             alerts.append(("temp", snap["cpu_temp"], f"CPU CRÍTICA: {snap['cpu_temp']:.0f}°C"))
-        elif snap["cpu_temp"] > 80:
+        elif snap["cpu_temp"] > TEMP_WARN:
             alerts.append(("temp", snap["cpu_temp"], f"CPU alta: {snap['cpu_temp']:.0f}°C"))
-    if snap["cpu_pct"] and snap["cpu_pct"] > 95:
+    if snap["cpu_pct"] and snap["cpu_pct"] > CPU_CRIT:
         alerts.append(("cpu", snap["cpu_pct"], f"CPU: {snap['cpu_pct']:.0f}%"))
-    if snap["ram_pct"] and snap["ram_pct"] > 90:
+    if snap["ram_pct"] and snap["ram_pct"] > RAM_CRIT:
         alerts.append(("ram", snap["ram_pct"], f"RAM: {snap['ram_pct']:.0f}%"))
-    if snap["battery_pct"] is not None and snap["battery_pct"] < 5 and not snap["battery_plugged"]:
+    if snap["battery_pct"] is not None and snap["battery_pct"] < BAT_LOW and not snap["battery_plugged"]:
         alerts.append(("battery", snap["battery_pct"], f"Bateria crítica: {snap['battery_pct']:.0f}%"))
     for kind, value, msg in alerts:
         conn.execute(
@@ -446,6 +469,7 @@ def main():
     log.info("  Acer Aspire 5 — Monitor Windows 11 (pythonnet/LHM)")
     log.info(f"  {platform.system()} {platform.release()}")
     log.info(f"  Intervalo: {INTERVAL}s | DB: {DB_PATH}")
+    log.info(f"  Alertas — Temp warn: {TEMP_WARN}°C | crit: {TEMP_CRIT}°C | CPU: {CPU_CRIT}% | RAM: {RAM_CRIT}%")
     log.info("=" * 60)
 
     conn = sqlite3.connect(DB_PATH)
@@ -461,7 +485,7 @@ def main():
             check_alerts(conn, snap)
             counter += 1
 
-            if counter % 12 == 0:
+            if counter % LOG_EVERY_N == 0:
                 temp_str = f"{snap['cpu_temp']:.0f}°C" if snap["cpu_temp"] else "N/A"
                 bat_str  = f"{snap['battery_pct']:.0f}%" if snap["battery_pct"] is not None else "N/A"
                 log.info(
