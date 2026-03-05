@@ -19,6 +19,7 @@
 
   "collection": {
     "top_processes": 5,
-    "log_every_n_snapshots": 12
+    "log_every_n_snapshots": 12,
+    "lhm_reconnect_after": 3
   }
 }

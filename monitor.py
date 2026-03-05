@@ -61,8 +61,9 @@ RAM_CRIT      = _alerts.get("ram_pct_critical",  90)
 BAT_LOW       = _alerts.get("battery_pct_low",    5)
 
 _collection       = CFG.get("collection", {})
-TOP_PROCS_N       = _collection.get("top_processes", 5)
-LOG_EVERY_N       = _collection.get("log_every_n_snapshots", 12)
+TOP_PROCS_N         = _collection.get("top_processes", 5)
+LOG_EVERY_N         = _collection.get("log_every_n_snapshots", 12)
+LHM_RECONNECT_AFTER = _collection.get("lhm_reconnect_after", 3)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -76,7 +77,9 @@ log = logging.getLogger("AcerMonitor")
 
 
 # ── LibreHardwareMonitor via pythonnet ────────────────────────
-_lhm_computer = None
+_lhm_computer       = None
+_lhm_fail_count     = 0
+
 
 def _find_dll():
     candidates = [
@@ -89,8 +92,20 @@ def _find_dll():
     return None
 
 
-def init_lhm():
+def _close_lhm():
     global _lhm_computer
+    try:
+        if _lhm_computer is not None:
+            _lhm_computer.Close()
+    except Exception:
+        pass
+    finally:
+        _lhm_computer = None
+
+
+def init_lhm():
+    global _lhm_computer, _lhm_fail_count
+    _close_lhm()
     try:
         import clr
         dll = _find_dll()
@@ -108,7 +123,8 @@ def init_lhm():
         c.IsBatteryEnabled     = True
         c.IsStorageEnabled     = True
         c.Open()
-        _lhm_computer = c
+        _lhm_computer  = c
+        _lhm_fail_count = 0
         log.info(f"LibreHardwareMonitor inicializado via DLL: {dll.name}")
         return True
     except ImportError:
@@ -120,8 +136,16 @@ def init_lhm():
 
 
 def get_temps_lhm():
+    global _lhm_fail_count
+
+    # Reconecta se falhou muitas vezes seguidas
+    if _lhm_fail_count >= LHM_RECONNECT_AFTER:
+        log.warning(f"Temperatura sem leitura por {_lhm_fail_count} coletas — reconectando LHM...")
+        init_lhm()
+
     if _lhm_computer is None:
         return None, None, {}
+
     try:
         temps    = {}
         cpu_temp = None
@@ -157,9 +181,16 @@ def get_temps_lhm():
             for sub in hw.SubHardware:
                 read_sensors(sub.Sensors, f"{hw_type}/{sub.Name}")
 
+        if cpu_temp is None:
+            _lhm_fail_count += 1
+        else:
+            _lhm_fail_count = 0
+
         return cpu_temp, gpu_temp, temps
+
     except Exception as e:
-        log.error(f"Erro ao ler temperatura: {e}")
+        _lhm_fail_count += 1
+        log.error(f"Erro ao ler temperatura (falha {_lhm_fail_count}): {e}")
         return None, None, {}
 
 
