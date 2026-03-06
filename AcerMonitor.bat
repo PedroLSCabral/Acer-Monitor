@@ -29,7 +29,8 @@ echo   [3] Encerrar monitor
 echo   [4] Gerar dashboard
 echo   [5] Analisar crashes
 echo   [6] Classificar reboot pendente
-echo   [7] Abrir pasta do projeto
+echo   [7] Rodar testes
+echo   [8] Abrir pasta do projeto
 echo   [0] Sair
 echo.
 set /p op="Escolha: "
@@ -70,6 +71,11 @@ if "%op%"=="6" (
     goto menu
 )
 if "%op%"=="7" (
+    python -m pytest test_monitor.py -v
+    pause
+    goto menu
+)
+if "%op%"=="8" (
     explorer "%PROJECT_DIR%"
     goto menu
 )
