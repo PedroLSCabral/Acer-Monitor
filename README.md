@@ -74,6 +74,9 @@ python monitor.py
 
 # Em background, sem janela
 pythonw monitor.py
+
+# Ver status atual (se está rodando, última coleta, crashes)
+python monitor.py --status
 ```
 
 ### Iniciar automaticamente com o Windows (recomendado)

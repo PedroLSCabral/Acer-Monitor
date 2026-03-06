@@ -22,6 +22,7 @@ import sys
 import json
 import signal
 import logging
+import argparse
 import platform
 import threading
 import subprocess
@@ -476,6 +477,75 @@ def check_alerts(conn, snap):
         conn.commit()
 
 
+def cmd_status():
+    """Exibe status atual do monitor: se está rodando, uptime e última coleta."""
+    import ctypes
+
+    print("=" * 55)
+    print("  Acer Crash Monitor — Status")
+    print("=" * 55)
+
+    # Verifica se há outro processo monitor.py rodando
+    monitor_pids = [
+        p.pid for p in psutil.process_iter(["pid", "name", "cmdline"])
+        if p.info["cmdline"] and "monitor.py" in " ".join(p.info["cmdline"])
+        and p.pid != os.getpid()
+    ]
+
+    if monitor_pids:
+        print(f"  ✅ Monitor rodando    PID(s): {', '.join(str(p) for p in monitor_pids)}")
+    else:
+        print("  ❌ Monitor não está rodando")
+
+    # Shutdown flag
+    if SHUTDOWN_FLAG.exists():
+        flag_ts = SHUTDOWN_FLAG.read_text(encoding="utf-8").strip()
+        print(f"  🔒 Último encerramento limpo: {flag_ts}")
+    else:
+        print("  ⚠️  Sem flag de shutdown limpo (possível crash anterior)")
+
+    # Dados do banco
+    if not DB_PATH.exists():
+        print("  📂 Banco de dados não encontrado")
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+
+        last = conn.execute(
+            "SELECT ts, cpu_pct, cpu_temp, ram_pct, battery_pct FROM snapshots ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+        stats = conn.execute(
+            "SELECT COUNT(*) as total, MIN(ts) as first_ts FROM snapshots"
+        ).fetchone()
+
+        crashes = conn.execute(
+            "SELECT COUNT(*) as n FROM boot_events WHERE kind = 'crash'"
+        ).fetchone()
+
+        pending = conn.execute(
+            "SELECT COUNT(*) as n FROM boot_events WHERE kind = 'desconhecido' AND notes != 'Primeira execução'"
+        ).fetchone()
+
+        conn.close()
+
+        if last:
+            temp_str = f"{last['cpu_temp']:.0f}°C" if last["cpu_temp"] else "N/A"
+            bat_str  = f"{last['battery_pct']:.0f}%" if last["battery_pct"] is not None else "N/A"
+            print(f"\n  📊 Última coleta:     {last['ts'][:19]}")
+            print(f"     CPU: {last['cpu_pct']:.0f}%  |  Temp: {temp_str}  |  RAM: {last['ram_pct']:.0f}%  |  Bat: {bat_str}")
+
+        if stats and stats["total"]:
+            print(f"\n  📁 Total de snapshots: {stats['total']:,}")
+            print(f"     Desde:             {stats['first_ts'][:19]}")
+
+        print(f"\n  💥 Crashes confirmados: {crashes['n']}")
+        if pending["n"] > 0:
+            print(f"  ❓ Reboots pendentes:   {pending['n']}  → rode classify_reboot.py")
+
+    print("=" * 55)
+
+
 # ── Loop principal ─────────────────────────────────────────────
 running = True
 
@@ -489,6 +559,15 @@ signal.signal(signal.SIGTERM, handle_signal)
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Acer Aspire 5 — Monitor de sistema")
+    parser.add_argument("--status", action="store_true",
+                        help="Exibe status atual do monitor e últimas métricas")
+    args = parser.parse_args()
+
+    if args.status:
+        cmd_status()
+        return
+
     log.info("=" * 60)
     log.info("  Acer Aspire 5 — Monitor Windows 11 (pythonnet/LHM)")
     log.info(f"  {platform.system()} {platform.release()}")
